@@ -1,0 +1,14 @@
+{
+  "renders": [
+    {
+      "source": "api/webhook.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "destination": "/api/webhook.py"
+    }
+  ]
+}
