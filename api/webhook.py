@@ -8,6 +8,44 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # 浏览器直接访问时，返回一个优雅的 Hello 状态欢迎页
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        html_content = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>FTL Invoice Bot</title>
+            <style>
+                body { 
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+                    display: flex; justify-content: center; align-items: center; 
+                    height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; 
+                }
+                .card { 
+                    text-align: center; padding: 40px; background: #1e293b; 
+                    border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); 
+                    max-width: 400px; width: 100%;
+                }
+                h1 { color: #38bdf8; margin-bottom: 10px; font-size: 24px; }
+                p { color: #94a3b8; font-size: 14px; line-height: 1.5; }
+                .status { display: inline-block; margin-top: 15px; padding: 6px 12px; background: #065f46; color: #34d399; border-radius: 20px; font-size: 12px; font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h1>👋 Hello! FTL Invoice Bot</h1>
+                <p>Telegram Webhook backend is online and running successfully on Vercel.</p>
+                <div class="status">● System Operational</div>
+            </div>
+        </body>
+        </html>
+        """
+        self.wfile.write(html_content.encode('utf-8'))
+
     def do_POST(self):
         try:
             content_length = int(self.headers.get('Content-Length', 0))
