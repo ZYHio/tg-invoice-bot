@@ -1,20 +1,17 @@
 import os
 import json
-import base64
 import requests
 from http.server import BaseHTTPRequestHandler
 
-# 从环境变量中读取密钥
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
-        
         try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
             update = json.loads(post_data.decode('utf-8'))
             
             # 处理用户发来的图片
@@ -36,7 +33,7 @@ class handler(BaseHTTPRequestHandler):
                 # 3. 发送带确认按钮的互动卡片给用户
                 self.send_confirmation_message(chat_id, invoice_data)
 
-            # 响应 Telegram 200 OK，告诉它消息已收到
+            # 响应 Telegram 200 OK
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
@@ -47,7 +44,6 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(str(e).encode('utf-8'))
 
     def parse_invoice_with_ai(self, image_url):
-        # 组装 OpenAI Vision 提示词
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {OPENAI_API_KEY}"
@@ -67,7 +63,6 @@ class handler(BaseHTTPRequestHandler):
         }
         res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
         result_text = res.json()["choices"][0]["message"]["content"].strip()
-        # 清理可能存在的 markdown 标签
         result_text = result_text.replace("```json", "").replace("```", "").strip()
         return json.loads(result_text)
 
