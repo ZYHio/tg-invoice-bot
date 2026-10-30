@@ -1,129 +1,107 @@
-import os
-import json
-import requests
 from http.server import BaseHTTPRequestHandler
+import json
+import os
+import requests
+from openai import OpenAI
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+# 从环境变量获取 Token 和 Key
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "9124318135:AAEX-aaOW7oB4opdIzoWlF9bwqcg4w1v9N8")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+def send_telegram_message(chat_id, text):
+    """向 Telegram 用户发送文本消息"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"Error sending message: {e}")
+
+def parse_text_with_gpt(text):
+    """使用 GPT-4o 解析记账文字"""
+    if not OPENAI_API_KEY:
+        return "⚠️ OpenAI API Key 未配置，无法解析文本。"
+
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    
+    prompt = f"""
+    你是一个财务记账助手。请从用户的文字中提取发票/消费信息，并格式化输出：
+    1. 商家名称
+    2. 交易日期 (如 YYYY-MM-DD，若未提及则填“今日”)
+    3. 总金额 (含币种，如 $50.00)
+    4. 消费类别 (如 餐饮、办公用品、交通等)
+
+    用户输入："{text}"
+    """
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"❌ GPT 解析失败: {str(e)}"
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # 浏览器直接访问时，返回一个优雅的 Hello 状态欢迎页
+        """处理 Vercel 健康检查"""
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
-        html_content = """
+        html = """
         <!DOCTYPE html>
         <html>
-        <head>
-            <meta charset="utf-8">
-            <title>FTL Invoice Bot</title>
-            <style>
-                body { 
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-                    display: flex; justify-content: center; align-items: center; 
-                    height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; 
-                }
-                .card { 
-                    text-align: center; padding: 40px; background: #1e293b; 
-                    border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); 
-                    max-width: 400px; width: 100%;
-                }
-                h1 { color: #38bdf8; margin-bottom: 10px; font-size: 24px; }
-                p { color: #94a3b8; font-size: 14px; line-height: 1.5; }
-                .status { display: inline-block; margin-top: 15px; padding: 6px 12px; background: #065f46; color: #34d399; border-radius: 20px; font-size: 12px; font-weight: bold; }
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h1>👋 Hello! FTL Invoice Bot</h1>
-                <p>Telegram Webhook backend is online and running successfully on Vercel.</p>
-                <div class="status">● System Operational</div>
-            </div>
+        <head><title>FTL Invoice Bot Status</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0f172a; color: white;">
+            <h1>👋 Hello! FTL Invoice Bot is Running</h1>
+            <p>Status: <span style="color: #22c55e;">● Operational</span></p>
         </body>
         </html>
         """
-        self.wfile.write(html_content.encode('utf-8'))
+        self.wfile.write(html.encode('utf-8'))
 
     def do_POST(self):
+        """处理 Telegram Webhook 消息"""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
-            update = json.loads(post_data.decode('utf-8'))
-            
-            # 处理用户发来的图片
-            if "message" in update and "photo" in update["message"]:
-                message = update["message"]
-                chat_id = message["chat"]["id"]
-                
-                # 获取最高清的图片 file_id
-                file_id = message["photo"][-1]["file_id"]
-                
-                # 1. 向 Telegram 获取图片下载链接
-                file_info_res = requests.get(f"{TELEGRAM_API_URL}/getFile?file_id={file_id}").json()
-                file_path = file_info_res["result"]["file_path"]
-                image_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
-                
-                # 2. 调用大模型视觉解析发票
-                invoice_data = self.parse_invoice_with_ai(image_url)
-                
-                # 3. 发送带确认按钮的互动卡片给用户
-                self.send_confirmation_message(chat_id, invoice_data)
+            data = json.loads(post_data.decode('utf-8'))
 
-            # 响应 Telegram 200 OK
+            # 提取消息信息
+            if "message" in data:
+                message = data["message"]
+                chat_id = message["chat"]["id"]
+
+                # 1. 如果发送的是文字
+                if "text" in message:
+                    user_text = message["text"]
+                    # 排除 /start 指令
+                    if user_text.startswith("/start"):
+                        send_telegram_message(chat_id, "👋 欢迎使用记账机器人！直接发消费文字给我即可（例如：`今天午餐花费 $15.5`）。")
+                    else:
+                        send_telegram_message(chat_id, "⏳ 正在使用 GPT-4o 解析记账信息...")
+                        ai_result = parse_text_with_gpt(user_text)
+                        send_telegram_message(chat_id, ai_result)
+
+                # 2. 如果发送的是图片，提示暂不支持
+                elif "photo" in message:
+                    send_telegram_message(chat_id, "📸 收到图片！当前已切换为文字记账模式，请直接发送消费文字（如：`打车 $25`）给机器人哦。")
+
+            # 始终返回 200，防止 Telegram 重新投递
             self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
             self.end_headers()
             self.wfile.write(b"OK")
-            
+
         except Exception as e:
-            self.send_response(500)
+            print(f"Error handling POST: {e}")
+            self.send_response(200)  # 即使出错也给 Telegram 200，防止 500 死循环
+            self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            self.wfile.write(str(e).encode('utf-8'))
-
-    def parse_invoice_with_ai(self, image_url):
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {OPENAI_API_KEY}"
-        }
-        payload = {
-            "model": "gpt-4o",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "请提取这张发票的 JSON 数据：{\"date\": \"YYYY-MM-DD\", \"vendor\": \"商家\", \"amount\": 0.00, \"category\": \"分类\"}。只返回纯JSON。"},
-                        {"type": "image_url", "image_url": {"url": image_url}}
-                    ]
-                }
-            ],
-            "max_tokens": 300
-        }
-        res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-        result_text = res.json()["choices"][0]["message"]["content"].strip()
-        result_text = result_text.replace("```json", "").replace("```", "").strip()
-        return json.loads(result_text)
-
-    def send_confirmation_message(self, chat_id, data):
-        text = (
-            f"📄 **识别到发票**：\n"
-            f"📅 日期: {data.get('date')}\n"
-            f"🏪 商家: {data.get('vendor')}\n"
-            f"💰 金额: `¥{data.get('amount')}`\n\n"
-            f"请确认金额是否正确？"
-        )
-        keyboard = {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ 确认无误并写入", "callback_data": f"save_{data.get('amount')}"},
-                    {"text": "❌ 取消", "callback_data": "cancel"}
-                ]
-            ]
-        }
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-            "reply_markup": json.dumps(keyboard)
-        }
-        requests.post(f"{TELEGRAM_API_URL}/sendMessage", json=payload)
+            self.wfile.write(b"OK")
